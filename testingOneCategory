@@ -1,0 +1,12 @@
+# reshape into X=t and Y=t+1
+# make everything united
+choose_partno = lambda x, part_no: [index for index in list(x.index) if index[2] == part_no]
+product_2772F0TR = sales_grouped.loc[[p for p in choose_partno(sales_grouped,'2772F0TR')]]
+
+#sorted by date
+sorted_date=product_2772F0TR.loc[sorted(list(product_2772F0TR.index), key=itemgetter(1))]
+
+# a very helpful note 
+product_2772F0TR.index.get_level_values(1)
+
+sorted_date.groupby(level=1).mean()
