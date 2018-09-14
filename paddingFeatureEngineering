@@ -1,0 +1,61 @@
+
+###########reshaping the input###################
+os.chdir('C:\\Users\\user\\Documents\\Xuan\\forecasting')
+complete = pickle.load(open( "C:\\Users\\user\\Documents\\Xuan\\forecasting\\complete_nn.p", "rb" ))
+
+complete_input = complete.iloc[:,0:complete.shape[1]-1]
+
+week_grouped = complete_input.groupby(['new_week'])
+y_grouped = complete[['new_week','actual_sales']].groupby(['new_week'])
+
+#checking X
+groups = dict(list(week_grouped))
+reshaped = np.array([np.array(groups[g]) for g in groups])
+# another way of writting
+reshaped=np.array([np.array(groups[g]).reshape(len(groups[g]),120) for g in groups])
+
+# the maxium length of the sequence
+max_length = len(max(reshaped, key=lambda row: len(row)))
+
+padding= lambda test, max_length: [np.concatenate((np.zeros(shape=(int(max_length-len(g)),120)), g)) for g in test]
+padded_grouped_input = padding(reshaped, max_length)
+
+# reshaping y and padding 
+y_groups = dict(list(y_grouped))
+reshaped_y=np.array([np.array(y_groups[y].iloc[:,1]) for y in y_groups])
+
+padding_y= lambda test, max_length: [np.pad(g, (max_length-len(g),0), 'constant', constant_values=(0)) for g in test]
+padded_grouped_y = padding_y(reshaped_y, max_length)
+
+seed = 7
+X_train, X_test, y_train, y_test = train_test_split(padded_grouped_input, padded_grouped_y, test_size=0.33, random_state=seed)
+
+# reshaping
+X_train = np.array(X_train).reshape(41, 40162, 120)
+y_train = np.array(y_train).reshape(41, 40162, 1)
+X_test = np.array(X_test).reshape(21, 40162, 120)
+y_test = np.array(y_test).reshape(21, 40162, 1)
+
+HIDDEN_SIZE = 128
+SEQLEN = max_length
+# reconstruct the model
+rnn_model = Sequential()
+rnn_model.add(SimpleRNN(HIDDEN_SIZE, return_sequences=True,input_shape=(SEQLEN, 120)))
+rnn_model.add(SimpleRNN(30, return_sequences=True, input_shape=(SEQLEN, 120)))
+rnn_model.add(SimpleRNN(1, return_sequences=True,input_shape=(SEQLEN, 120)))
+rnn_model.add(Activation("linear"))
+
+print(rnn_model.summary(90))
+
+rnn_model.compile(loss='mse', optimizer='adam',metrics=['accuracy'])
+
+# running
+epochs = 50
+batch_size = 10
+early_stopping = EarlyStopping(monitor='val_loss', patience=6, verbose=1)
+
+rnn_model.fit(X_train, y_train,
+          batch_size=batch_size,
+          epochs=epochs,
+          validation_data=(X_test, y_test),
+          callbacks=[early_stopping])
