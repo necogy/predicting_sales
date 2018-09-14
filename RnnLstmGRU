@@ -1,0 +1,121 @@
+
+#########################loading libraries###################################
+import os
+import pickle
+import matplotlib.pyplot as plt
+import numpy as np
+from keras.callbacks import TensorBoard
+from pandas_summary import DataFrameSummary
+from keras.models import Sequential
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+from sklearn.model_selection import train_test_split
+from sklearn.model_selection import StratifiedKFold
+import tensorflow as tf
+import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
+from keras.layers import LSTM, GRU
+from sklearn.metrics import mean_squared_error
+from keras import backend as K
+from sklearn import preprocessing
+from keras.wrappers.scikit_learn import KerasRegressor
+from keras.layers import Input, Dense, concatenate, Flatten, Reshape
+from keras.models import Model
+from __future__ import print_function
+from keras.preprocessing import sequence
+from keras.layers import Activation, SimpleRNN
+from keras.callbacks import EarlyStopping
+
+os.chdir('C:\\Users\\user\\Documents\\Xuan\\forecasting')
+most_complete = pickle.load(open( "C:\\Users\\user\\Documents\\Xuan\\forecasting\\most_complete_rnn.p", "rb" ))
+
+#############reconstructing the y variable##############
+w1 = np.array(most_complete[['change_in_sales','last_week_sales']]).reshape(670212, 1, 2)
+w2 = np.array(most_complete[['change_in_sales_2','last_week_sales_2']]).reshape(670212, 1, 2)
+w3 = np.array(most_complete[['change_in_sales_3','last_week_sales_3']]).reshape(670212, 1, 2)
+time_varying_part = np.concatenate((w1, w2, w3), axis=1)
+
+# nost adding the extra info: cumulative sales for instance
+X = pd.concat([most_complete[['cumulative_sales','last_month_sales','change_in_customers',
+                              'last_week_customers', 'last_week_sales_4']],
+              most_complete.loc[:,'1400_store_type':'open']], axis=1)
+
+Y = most_complete.loc[:,'actual_sales']
+
+seed = 7
+X_train, X_test, y_train, y_test, time_varying_train, time_varying_test = train_test_split(X, Y, time_varying_part, test_size=0.33, random_state=seed)
+
+scale = StandardScaler()
+scaled_X_train_static = scale.fit_transform(X_train)
+scaled_X_test_static = scale.fit_transform(X_test)
+#####################original method###########################
+Y = most_complete.iloc[:,most_complete.shape[1]-1]
+
+X = pd.concat([most_complete[['cumulative_sales',
+                              'last_month_sales',
+                              'change_in_customers',
+                              'last_week_customers']],
+              most_complete.loc[:,'1400_store_type':'open']], axis=1)
+
+time_varying_part = most_complete.loc[:,'last_week_sales':'last_week_sales_4'] 
+
+X_train, X_test, y_train, y_test,time_varying_train, time_varying_test = train_test_split(X, Y,time_varying_part, test_size=0.33, random_state=seed)
+
+scale = StandardScaler()
+scaled_X_train_static = scale.fit_transform(X_train)
+scaled_X_test_static = scale.fit_transform(X_test)
+
+########################modeling######################
+feature_input = Input(shape=(121,))
+dense_1_h = Dense(12, activation='tanh')(feature_input)
+dense_2_h = Dense(24, activation='tanh')(dense_1_h)
+dense_1_c = Dense(12, activation='tanh')(feature_input)
+dense_2_c = Dense(24, activation='tanh')(dense_1_c)
+
+series_input = Input(shape=(3, 2))
+lstm = LSTM(24)(series_input, initial_state=[dense_2_h, dense_2_c])
+
+out = Dense(1, activation="linear", name = 'output')(lstm)
+model = Model(inputs=[feature_input,series_input], outputs=out)
+model.compile(loss='mean_squared_error', optimizer='adam', metrics=['accuracy'])
+
+#model = Model(inputs=time_steps, outputs=output_layer)
+print(model.summary(90))
+
+# running
+epochs = 500
+batch_size = 30
+early_stopping = EarlyStopping(monitor='val_loss', patience=4, verbose=1)
+
+model.fit([scaled_X_train_static,time_varying_train], y_train,
+          batch_size=batch_size,
+          epochs=epochs,
+          validation_data=([scaled_X_test_static,time_varying_test], y_test),
+          callbacks=[early_stopping])
+
+# 0.75 result had been saved
+model.save('adding_lastWeekSales_model')
+
+###################prepartion for GRU
+feature_input = Input(shape=(121,))
+dense_1_h = Dense(64, activation='tanh')(feature_input)
+dense_2_h = Dense(34, activation='tanh')(dense_1_h)
+
+series_input = Input(shape=(3, 2))
+gru = GRU(34,return_sequences=True)(series_input, initial_state=[dense_2_h])
+gru = GRU(12)(gru)
+out = Dense(1, activation="tanh")(gru)
+gru_model = Model(inputs=[feature_input,series_input], outputs=out)
+gru_model.compile(loss='mean_squared_error', optimizer='adam', metrics=['accuracy'])
+
+# running
+epochs = 500
+batch_size = 500
+early_stopping = EarlyStopping(monitor='val_loss', patience=2, verbose=1)
+
+gru_model.fit([scaled_X_train_static,time_varying_train], y_train,
+          batch_size=batch_size,
+          epochs=epochs,
+          validation_data=([scaled_X_test_static,time_varying_test], y_test),
+          callbacks=[early_stopping])
