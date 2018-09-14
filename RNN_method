@@ -1,0 +1,141 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Aug 28 14:47:57 2018
+
+@author: user
+"""
+
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Aug  9 11:19:47 2018
+
+@author: Xuan
+"""
+
+#########################loading libraries###################################
+import os
+import pickle
+import matplotlib.pyplot as plt
+import numpy as np
+from keras.callbacks import TensorBoard
+from pandas_summary import DataFrameSummary
+from keras.models import Sequential
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+from sklearn.model_selection import train_test_split
+from sklearn.model_selection import StratifiedKFold
+import tensorflow as tf
+import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
+from keras.layers import LSTM
+from sklearn.metrics import mean_squared_error
+from keras import backend as K
+from sklearn import preprocessing
+from keras.wrappers.scikit_learn import KerasRegressor
+from keras.layers import Input, Dense, concatenate, Flatten, Reshape
+from keras.models import Model
+from __future__ import print_function
+from keras.preprocessing import sequence
+from keras.layers import Activation, SimpleRNN
+from keras.callbacks import EarlyStopping
+
+os.chdir('C:\\Users\\user\\Documents\\Xuan\\forecasting')
+complete = pickle.load(open( "C:\\Users\\user\\Documents\\Xuan\\forecasting\\complete_nn.p", "rb" ))
+
+X = complete.iloc[:,0:complete.shape[1]-1]
+Y = complete.iloc[:,complete.shape[1]-1]
+
+seed = 7
+X_train, X_test, y_train, y_test = train_test_split(X, Y, test_size=0.33, random_state=seed)
+
+scale = StandardScaler()
+scaled_X_train_static = scale.fit_transform(X_train.iloc[:,4:])
+scaled_X_test_static = scale.fit_transform(X_test.iloc[:,4:])
+
+time_varying_train=X_train.loc[:,'last_week_sales':'last_week_sales_4'] 
+time_varying_test=X_test.loc[:,'last_week_sales':'last_week_sales_4'] 
+###################### RNN ################################
+
+x_dim = X.shape
+HIDDEN_SIZE = 128
+BATCH_SIZE = 100
+
+#reshaping
+reshaped_X_train=X_train.values.reshape(len(X_train), 120, 1)
+reshaped_X_test=X_test.values.reshape(len(X_test), 120, 1)
+
+rnn_model = Sequential()
+rnn_model.add(SimpleRNN(units = HIDDEN_SIZE,input_shape=(120, 1)))
+rnn_model.add(Dense(input_dim=25, units=1))
+rnn_model.add(Activation("relu"))
+rnn_model.compile(loss='mse', optimizer='adam')
+
+epochs = 500
+batch_size = 10
+early_stopping = EarlyStopping(monitor='val_loss', patience=10, verbose=1)
+rnn_model.fit(reshaped_X_train, y_train,
+          batch_size=batch_size,
+          epochs=epochs,
+          validation_data=(reshaped_X_test, y_test),
+          callbacks=[early_stopping])
+
+######################normal shape: no padding ##################################
+sales = pickle.load(open( "C:\\Users\\user\\Documents\\Xuan\\forecasting\\sku_weekly_store_sales_nikkei_added.p", "rb" ))
+complementary=sales.loc[:,'cumulative_sales':'change_in_customers'] 
+complete.reset_index(drop=True, inplace=True)
+complementary.reset_index(drop=True, inplace=True)
+
+most_complete = pd.concat([complementary,complete], axis=1)
+most_complete.shape
+most_complete.to_pickle('most_complete_rnn.p')
+
+X = most_complete.iloc[:,0:complete.shape[1]-1]
+Y = most_complete.iloc[:,complete.shape[1]-1]
+
+seed = 7
+X_train, X_test, y_train, y_test = train_test_split(X, Y, test_size=0.33, random_state=seed)
+X_train = np.array(X_train).reshape(449042, 1, 120)
+X_test = np.array(X_test).reshape(221170, 1, 120)
+y_train = np.array(y_train).reshape(449042, 1, 1)
+y_test = np.array(y_test).reshape(221170, 1, 1)
+
+HIDDEN_SIZE = 128
+# reconstruct the model
+rnn_model = Sequential()
+#rnn_model.add(SimpleRNN(120, return_sequences=False, input_shape= (SEQLEN, 120)))
+rnn_model.add(SimpleRNN(HIDDEN_SIZE, return_sequences=True,input_shape=(1, 120)))
+rnn_model.add(SimpleRNN(1, return_sequences=True,input_shape=(1, 120)))
+rnn_model.add(Activation("linear"))
+print(rnn_model.summary(90))
+
+rnn_model.compile(loss='mse', optimizer='adam',metrics=['mean_squared_error'])
+
+# running
+epochs = 500
+batch_size = 100
+early_stopping = EarlyStopping(monitor='val_loss', patience=4, verbose=1)
+
+rnn_model.fit(X_train, y_train,
+          batch_size=batch_size,
+          epochs=epochs,
+          validation_data=(X_test, y_test),
+          callbacks=[early_stopping])
+
+####################### comfirming ###################
+X_train.loc[:,'last_week_sales':'last_week_sales_4'].iloc[3]
+time_varying_train[3]
+####################### evaluating ###############################
+model.fit([time_varying_train, scaled_X_train_static], y_train,
+          batch_size=batch_size,
+          epochs=epochs,
+          validation_data=([time_varying_test, scaled_X_test_static], y_test),
+          callbacks=[early_stopping])
+
+
+model.evaluate(x=[scaled_X_test_static, time_varying_test], y=y_test, verbose=1)
+pred = model.predict(x=[scaled_X_test_static, time_varying_test])
+pred = np.round(pred)
+from sklearn.metrics import accuracy_score
+accuracy_score(y_test, pred)
+
